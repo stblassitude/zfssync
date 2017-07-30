@@ -53,14 +53,13 @@ number of scenarios to copy collections of datasets:
 
 * locally from one pool to another; for example, when creating a new pool to
   replace an old one
-* from the local machine to a cold-standby box
-* to a backup server
+* from the local machine to a cold-standby box or to a backup server
 * from one server to another, by running `zfssync` on a third host, for example
   from the jump server or a management station, crossing from one DMZ to another
 
-You can run zfssync on any machine with Python 3 installed (probably not Windows
-though), and the local machine does not have to have ZFS available, as long as
-all datasets are remote.
+You can run `zfssync` on any machine with Python 3 installed (probably not
+Windows though). The local machine does not have to have ZFS available, as long
+as all datasets are remote.
 
 
 ## Examples
@@ -79,10 +78,16 @@ Sync all newco websites from the webserver to the local system.
 $ zfssync -gs webserver:www/*newco* www/production
 ```
 
+Sync all newco websites from the webserver to the test server.
+
+```sh
+$ zfssync -gs webserver:www/*newco* test01:www
+```
+
 
 ## Error Message
 
-The following error message indicate invalid parameters to `zfssync`, or a
+The following error messages indicate invalid parameters to `zfssync`, or a
 problem in the ZFS datasets.
 
 * `Command "zfs `...`" exited 1`
