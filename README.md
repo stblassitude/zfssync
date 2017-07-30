@@ -164,7 +164,7 @@ existing datasets and snapshots.
 
 ## Changelog
 
-### Unreleased
+### Release 1.1.0 (2017-07-30)
 
 * Improve error handling and documentation
 * Add option `--continue` to continue processing sources even after an error
