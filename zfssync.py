@@ -60,6 +60,7 @@ class ZfssyncException(Exception):
 def shellQuote(cmd):
     return str.join(" ", list(map(lambda x : shlex.quote(x), cmd)))
 
+
 def shellPopen(host, cmd, nosideeffect, stdout):
     global loglevel
     if host != localhost:
@@ -83,7 +84,7 @@ def shellGenerator(host, cmd, nosideeffect=True):
     popen.stdout.close()
     return_code = popen.wait()
     if return_code:
-        raise subprocess.CalledProcessError(return_code, cmd)
+        raise ZfssyncException("Command \"{}\" exited {}".format(shellQuote(cmd), return_code))
 
 
 def shellExec(host, cmd, nosideeffect=True):
@@ -92,7 +93,7 @@ def shellExec(host, cmd, nosideeffect=True):
         return
     return_code = popen.wait()
     if return_code:
-        raise subprocess.CalledProcessError(return_code, cmd)
+        raise ZfssyncException("Command \"{}\" exited {}".format(shellQuote(cmd), return_code))
 
 
 def shellPipe(hosta, cmda, hostb, cmdb, nosideeffect=True):
@@ -202,7 +203,7 @@ def getZfsDataset(spec, pool=None):
     """Factory function that returns a dataset for the given spec"""
     m = ZfsDataset.specpattern.match(spec)
     if not m:
-        raise ZfssyncException('invalid dataset specification "{}"'.format(spec))
+        raise ZfssyncException('Invalid dataset specification "{}"'.format(spec))
     if pool and m.group('host'):
         raise ZfssyncException('spec and pool both specify a host ("{}", "{}")'.format(pool, m.group('host')))
     if pool and m.group('pool') and pool.name != m.group('pool'):
@@ -231,7 +232,8 @@ class Source:
                     self.datasets.add(getZfsDataset(s, p))
         else:
             if self.spec.dataset not in p.datasets:
-                raise ZfssyncException("Can't add \"{}\": no such dataset".format(self))
+                raise ZfssyncException("Can't add \"{}:{}\": no such dataset".format(
+                    self.spec.pool.host, self.spec.dataset))
             self.datasets.add(self.spec)
         if recursive:
             for ds in set(self.datasets):
@@ -240,10 +242,7 @@ class Source:
                         self.datasets.add(getZfsDataset(s, p))
 
     def __repr__(self):
-        if self.host:
-            return "({}:{} with {} datasets)".format(self.host, self.dataset, len(self.datasets))
-        else:
-            return "({} with {} datasets)".format(self.dataset, len(self.datasets))
+        return "({} with {} datasets)".format(self.spec, len(self.datasets))
 
 
 class Destination:
@@ -276,32 +275,54 @@ class Destination:
         latestDstSnapId = dstds.snapshots[-1][len(dstds.dataset)+1:]
         latestSrcSnap = "{}@{}".format(srcds.dataset, latestDstSnapId)
         if latestSrcSnap not in srcds.snapshots:
-            raise ZfssyncException("Latest destination snapshot \"{}\" is not in source \"{}\"".format(latestdst, srcds))
+            raise ZfssyncException("Latest destination snapshot \"{}\" is not in source \"{}\"".format(latestDstSnapId, srcds))
         return latestDstSnapId
 
-    def sync(self, source):
-        for srcds in sorted(source.datasets):
-            dstds = self.targetpath(srcds)
-            startSnapId = self.relativesnapshots(srcds, dstds)
-            endSnap = srcds.snapshots[-1]
-            endSnapId = endSnap[len(srcds.dataset)+1:]
-            startcmd = []
-            if startSnapId:
-                if endSnapId == startSnapId:
-                    log(1, "sync: {} -> {}: datasets are in sync".format(srcds, dstds))
-                    continue
-                startcmd = ['-I',  startSnapId]
-                log(1, "sync: {} -> {}: syncing snapshots from {} to {}".format(srcds, dstds, startSnapId, endSnapId))
-            else:
-                log(1, "sync: {} -> {}: syncing all snapshots up to {}".format(srcds, dstds, endSnapId))
-            shellPipe(srcds.pool.host, ['zfs', 'send'] + startcmd + [endSnap],
-                    dstds.pool.host, ['zfs', 'recv', '-F', dstds.dataset], nosideeffect=False)
+    def sync(self, srcds):
+        dstds = self.targetpath(srcds)
+        startSnapId = self.relativesnapshots(srcds, dstds)
+        endSnap = srcds.snapshots[-1]
+        endSnapId = endSnap[len(srcds.dataset)+1:]
+        startcmd = []
+        if startSnapId:
+            if endSnapId == startSnapId:
+                log(1, "sync: {} -> {}: datasets are in sync".format(srcds, dstds))
+                return
+            startcmd = ['-I',  startSnapId]
+            log(1, "sync: {} -> {}: syncing snapshots from {} to {}".format(srcds, dstds, startSnapId, endSnapId))
+        else:
+            log(1, "sync: {} -> {}: syncing all snapshots up to {}".format(srcds, dstds, endSnapId))
+        shellPipe(srcds.pool.host, ['zfs', 'send'] + startcmd + [endSnap],
+                dstds.pool.host, ['zfs', 'recv', '-F', dstds.dataset], nosideeffect=False)
 
     def __repr__(self):
-        if self.host:
-            return "({}:{})".format(self.host, self.dataset)
-        else:
-            return "({})".format(self.dataset)
+        return "{}".format(self.destination)
+
+
+def zfssync(sources, destination, snapshot=False, continueOnError=False):
+    if snapshot:
+        snapshot = datetime.utcnow().strftime('%Y%m%d%H%M')
+        for s in sources:
+            try:
+                destination.createsnapshots(s, snapshot)
+            except ZfssyncException as e:
+                log(0, "Error snapshotting {}: {}".format(s, e))
+                if continueOnError:
+                    continue
+                else:
+                    return 1
+    for source in sources:
+        for srcds in sorted(source.datasets):
+            try:
+                destination.sync(srcds)
+            except ZfssyncException as e:
+                log(0, "Error syncing {}: {}".format(srcds, e))
+                if continueOnError:
+                    continue
+                else:
+                    return 1
+    return 0
+
 
 def main(argv):
     global dontexecute, loglevel
@@ -328,6 +349,8 @@ def main(argv):
     ''')
     parser = argparse.ArgumentParser(description='Sync one or more ZFS datasets from one pool to another',
             epilog=epilog, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument('-c', '--continue', dest='cont', action='store_true',
+                    help='when encountering an error, continue with the next dataset')
     parser.add_argument('-g', '--glob', dest='glob', action='store_true',
                     help='interpret sources as glob patterns')
     parser.add_argument('-n', '--notreally', dest='notreally', action='store_true',
@@ -352,15 +375,20 @@ def main(argv):
         destination = Destination(args.destination[0])
         sources = []
         for s in args.sources:
-            sources.append(Source(s, recursive=args.recursive, glob=args.glob))
-        if args.create:
-            snapshot = datetime.utcnow().strftime('%Y%m%d%H%M')
-            for s in sources:
-                destination.createsnapshots(s, snapshot)
-        for s in sources:
-            destination.sync(s)
+            try:
+                sources.append(Source(s, recursive=args.recursive, glob=args.glob))
+            except ZfssyncException as e:
+                log(0, "Error adding source {}: {}".format(s, e))
+                if args.cont:
+                    continue
+                else:
+                    sys.exit(1)
+        r = zfssync(sources, destination, snapshot=args.create,
+                continueOnError=args.cont)
+        sys.exit(r)
+
     except ZfssyncException as e:
-        print("Error: {}".format(e), file=sys.stderr)
+        log(0, "Error: {}".format(e))
         sys.exit(1)
 
 if __name__ == "__main__":
