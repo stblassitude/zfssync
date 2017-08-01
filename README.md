@@ -150,12 +150,12 @@ zfs snapshot pool/dataset@201707301234
 
 * Copy over a dataset that does not yet exist on the destination, or has no snapshots:
 ```
-zfs send sourcepool/dataset@201707301234 | ssh host zfs recv -F destpool/dataset
+zfs send -p sourcepool/dataset@201707301234 | ssh host zfs recv -F destpool/dataset
 ```
 
-* Copy over a dataset that has at least one snapshot:
+* Copy over a dataset that has at least one snapshot on the destination pool:
 ```
-zfs send -I 201707290000 sourcepool/dataset@201707301234 | \
+zfs send -p -I 201707290000 sourcepool/dataset@201707301234 | \
 ssh host zfs recv -F destpool/dataset
 ```
 
@@ -163,6 +163,10 @@ In addition, the script executes `zfs list` on all systems to learn about
 existing datasets and snapshots.
 
 ## Changelog
+
+### Unreleased
+
++ Always send dataset properties (`zfs send -p`)
 
 ### Release 1.1.0 (2017-07-30)
 

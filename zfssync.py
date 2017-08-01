@@ -292,7 +292,7 @@ class Destination:
             log(1, "sync: {} -> {}: syncing snapshots from {} to {}".format(srcds, dstds, startSnapId, endSnapId))
         else:
             log(1, "sync: {} -> {}: syncing all snapshots up to {}".format(srcds, dstds, endSnapId))
-        shellPipe(srcds.pool.host, ['zfs', 'send'] + startcmd + [endSnap],
+        shellPipe(srcds.pool.host, ['zfs', 'send', '-p'] + startcmd + [endSnap],
                 dstds.pool.host, ['zfs', 'recv', '-F', dstds.dataset], nosideeffect=False)
 
     def __repr__(self):
