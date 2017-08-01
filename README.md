@@ -164,7 +164,7 @@ existing datasets and snapshots.
 
 ## Changelog
 
-### Unreleased
+### Release 1.1.1 (2017-08.01)
 
 + Always send dataset properties (`zfs send -p`)
 
