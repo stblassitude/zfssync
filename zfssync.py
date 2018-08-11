@@ -112,12 +112,19 @@ def shellPipe(hosta, cmda, hostb, cmdb, nosideeffect=True):
         return
     pa = subprocess.Popen(cmda, stdout=subprocess.PIPE)
     pb = subprocess.Popen(cmdb, stdin=pa.stdout)
-    return_code = pa.wait()
-    if return_code:
-        raise ZfssyncException("Command \"{}\" exited {}".format(shellQuote(cmda), return_code))
-    return_code = pb.wait()
-    if return_code:
-        raise ZfssyncException("Command \"{}\" exited {}".format(shellQuote(cmdb), return_code))
+    waiting = [ pa, pb ]
+    while len(waiting) > 0:
+        for p in waiting:
+            try:
+                p.wait(1)
+            except subprocess.TimeoutExpired:
+                continue
+            waiting.remove(p)
+            if p.returncode != 0:
+                for pk in waiting:
+                    pk.terminate()
+                raise ZfssyncException("Command \"{}\" exited {}".format(shellQuote(p.args),
+                    p.returncode))
 
 
 class Zfspool:
